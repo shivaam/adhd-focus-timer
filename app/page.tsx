@@ -1,65 +1,290 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Home } from "@/components/Home";
+import { StartSheet } from "@/components/StartSheet";
+import { UnstuckSheet } from "@/components/UnstuckSheet";
+import { Primer } from "@/components/Primer";
+import { SessionView } from "@/components/SessionView";
+import { BreakView } from "@/components/BreakView";
+import { Complete } from "@/components/Complete";
+import { Stats } from "@/components/Stats";
+import { SettingsView } from "@/components/SettingsView";
+import {
+  loadCurrent,
+  loadSessions,
+  newId,
+  saveCurrent,
+  saveSession,
+  useSettings,
+  useTags,
+} from "@/lib/store";
+import { pickBreakPrompt, randomBodyAction } from "@/lib/prompts";
+import type {
+  AppMode,
+  PrimerAction,
+  Session,
+  SessionSource,
+} from "@/lib/types";
+
+export default function Page() {
+  const [mode, setMode] = useState<AppMode>("home");
+  const [tags, setTags] = useTags();
+  const [settings, setSettings] = useSettings();
+  const [allSessions, setAllSessions] = useState<Session[]>([]);
+
+  const [current, setCurrent] = useState<Session | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [pausedAt, setPausedAt] = useState<number | null>(null);
+  const [pausedAccumMs, setPausedAccumMs] = useState(0);
+
+  const [primerAction, setPrimerAction] = useState<PrimerAction | null>(null);
+  const [completedSession, setCompletedSession] = useState<Session | null>(null);
+  const [breakPrompt, setBreakPrompt] = useState<string>("Drink water.");
+  const [unstuckThought, setUnstuckThought] = useState<string>("");
+
+  const refreshSessions = () => setAllSessions(loadSessions());
+
+  // Hydrate any in-flight session on mount.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    setAllSessions(loadSessions());
+    const c = loadCurrent();
+    if (c && c.completedAt === null) {
+      const totalMs = c.durationMin * 60_000;
+      const elapsed = Date.now() - c.startedAt;
+      if (elapsed >= totalMs) {
+        const completed = { ...c, completedAt: c.startedAt + totalMs };
+        saveSession(completed);
+        saveCurrent(null);
+        setCompletedSession(completed);
+        setBreakPrompt(pickBreakPrompt());
+        setMode("break");
+      } else {
+        setCurrent(c);
+        setMode("session");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    saveCurrent(current);
+  }, [current]);
+
+  const tagFor = useMemo(() => {
+    if (!current?.tagId) return null;
+    return tags.find((t) => t.id === current.tagId) ?? null;
+  }, [current, tags]);
+
+  const startSession = (opts: {
+    durationMin: number;
+    tagId: string | null;
+    intent: string | null;
+    source: SessionSource;
+    aiSuggestion?: { action: string; why?: string };
+  }) => {
+    const s: Session = {
+      id: newId(),
+      startedAt: Date.now(),
+      durationMin: opts.durationMin,
+      completedAt: null,
+      tagId: opts.tagId,
+      intent: opts.intent,
+      source: opts.source,
+      aiSuggestion: opts.aiSuggestion,
+    };
+    setCurrent(s);
+    setPaused(false);
+    setPausedAt(null);
+    setPausedAccumMs(0);
+    setMode("session");
+  };
+
+  const pauseSession = () => {
+    if (paused) return;
+    setPaused(true);
+    setPausedAt(Date.now());
+  };
+
+  const resumeSession = () => {
+    if (!paused || pausedAt === null) return;
+    setPausedAccumMs((acc) => acc + (Date.now() - pausedAt));
+    setPaused(false);
+    setPausedAt(null);
+  };
+
+  const cancelSession = () => {
+    if (!current) return;
+    saveCurrent(null);
+    setCurrent(null);
+    setPaused(false);
+    setPausedAt(null);
+    setPausedAccumMs(0);
+    setMode("home");
+  };
+
+  const completeSession = () => {
+    if (!current) return;
+    const completed: Session = { ...current, completedAt: Date.now() };
+    saveSession(completed);
+    saveCurrent(null);
+    refreshSessions();
+    setCurrent(null);
+    setCompletedSession(completed);
+    setPaused(false);
+    setPausedAt(null);
+    setPausedAccumMs(0);
+    setBreakPrompt(pickBreakPrompt());
+    setMode("break");
+  };
+
+  const tagCompleted = (tagId: string | null) => {
+    if (!completedSession) return;
+    const updated = { ...completedSession, tagId };
+    saveSession(updated);
+    refreshSessions();
+    setCompletedSession(updated);
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="flex flex-col flex-1 min-h-screen w-full">
+      {mode === "home" && (
+        <Home
+          onUnstick={(thought) => {
+            const trimmed = thought.trim();
+            if (!trimmed) {
+              setPrimerAction(randomBodyAction());
+              setMode("primer");
+              return;
+            }
+            setUnstuckThought(trimmed);
+            setMode("unstuck");
+          }}
+          onStart={() => setMode("start")}
+          onOpenStats={() => {
+            refreshSessions();
+            setMode("stats");
+          }}
+          onOpenSettings={() => setMode("settings")}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      )}
+
+      {mode === "start" && (
+        <StartSheet
+          tags={tags}
+          defaultDuration={settings.defaultDuration}
+          onCancel={() => setMode("home")}
+          onStart={({ durationMin, tagId, intent }) =>
+            startSession({ durationMin, tagId, intent, source: "start_now" })
+          }
+        />
+      )}
+
+      {mode === "unstuck" && (
+        <UnstuckSheet
+          initialThought={unstuckThought}
+          onCancel={() => {
+            setUnstuckThought("");
+            setMode("home");
+          }}
+          onStart={({ durationMin, intent, suggestion }) => {
+            setUnstuckThought("");
+            startSession({
+              durationMin,
+              tagId: null,
+              intent,
+              source: "unstuck",
+              aiSuggestion: suggestion
+                ? { action: suggestion.action, why: suggestion.why }
+                : undefined,
+            });
+          }}
+          onPickPhysical={(action) => {
+            setUnstuckThought("");
+            setPrimerAction(action);
+            setMode("primer");
+          }}
+        />
+      )}
+
+      {mode === "primer" && primerAction && (
+        <Primer
+          action={primerAction}
+          onCancel={() => {
+            setPrimerAction(null);
+            setMode("home");
+          }}
+          onDone={() => {
+            const action = primerAction;
+            setPrimerAction(null);
+            startSession({
+              durationMin: settings.defaultDuration,
+              tagId: null,
+              intent: null,
+              source: "physical_action",
+              aiSuggestion: { action: action.text, why: "" },
+            });
+          }}
+        />
+      )}
+
+      {mode === "session" && current && (
+        <SessionView
+          session={current}
+          paused={paused}
+          pausedAt={pausedAt}
+          pausedAccumMs={pausedAccumMs}
+          settings={settings}
+          tag={tagFor}
+          onPause={pauseSession}
+          onResume={resumeSession}
+          onCancel={cancelSession}
+          onComplete={completeSession}
+        />
+      )}
+
+      {mode === "break" && (
+        <BreakView
+          prompt={breakPrompt}
+          onDone={() => setMode("complete")}
+        />
+      )}
+
+      {mode === "complete" && completedSession && (
+        <Complete
+          session={completedSession}
+          tags={tags}
+          onTag={tagCompleted}
+          onHome={() => {
+            setCompletedSession(null);
+            setMode("home");
+          }}
+          onAnother={() => {
+            setCompletedSession(null);
+            setMode("start");
+          }}
+        />
+      )}
+
+      {mode === "stats" && (
+        <Stats
+          sessions={allSessions}
+          tags={tags}
+          onClose={() => setMode("home")}
+        />
+      )}
+
+      {mode === "settings" && (
+        <SettingsView
+          settings={settings}
+          tags={tags}
+          onSettings={setSettings}
+          onTags={setTags}
+          onClose={() => setMode("home")}
+        />
+      )}
+    </main>
   );
 }
