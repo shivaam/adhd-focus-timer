@@ -117,6 +117,23 @@ export default function Page() {
 
   const cancelSession = () => {
     if (!current) return;
+
+    const now = Date.now();
+    const currentPauseMs = paused && pausedAt ? now - pausedAt : 0;
+    const totalPausedMs = pausedAccumMs + currentPauseMs;
+    const elapsedMs = Math.max(0, now - current.startedAt - totalPausedMs);
+    const actualMin = Math.floor(elapsedMs / 60000);
+
+    if (actualMin >= 1) {
+      const ended: Session = {
+        ...current,
+        durationMin: actualMin,
+        completedAt: now,
+      };
+      saveSession(ended);
+      refreshSessions();
+    }
+
     saveCurrent(null);
     setCurrent(null);
     setPaused(false);
