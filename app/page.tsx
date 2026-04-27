@@ -166,6 +166,9 @@ export default function Page() {
     saveSession(updated);
     refreshSessions();
     setCompletedSession(updated);
+    if (tagId) {
+      setSettings({ ...settings, lastUsedTagId: tagId });
+    }
   };
 
   return (

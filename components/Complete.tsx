@@ -12,11 +12,11 @@ type Props = {
 };
 
 export function Complete({ session, tags, onTag, onHome, onAnother }: Props) {
-  const [tagged, setTagged] = useState(session.tagId !== null);
+  const [currentTagId, setCurrentTagId] = useState<string | null>(session.tagId);
 
-  const handleTag = (tagId: string | null) => {
+  const pickTag = (tagId: string | null) => {
+    setCurrentTagId(tagId);
     onTag(tagId);
-    setTagged(true);
   };
 
   return (
@@ -29,28 +29,36 @@ export function Complete({ session, tags, onTag, onHome, onAnother }: Props) {
         <div className="text-text-2 mt-2 tnum">{session.durationMin} minutes focused</div>
       </div>
 
-      {!tagged && (
-        <div className="w-full mb-6">
-          <div className="text-[11px] tracking-[0.2em] uppercase text-text-3 font-semibold mb-3">Tag this session?</div>
-          <div className="flex flex-wrap gap-2 justify-center">
-            {tags.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => handleTag(t.id)}
-                className="px-3.5 py-2 rounded-full bg-surface text-text border border-hairline text-sm font-medium active:scale-[0.99] transition"
-              >
-                {t.name}
-              </button>
-            ))}
-            <button
-              onClick={() => handleTag(null)}
-              className="px-3.5 py-2 rounded-full bg-surface text-text-2 border border-hairline border-dashed text-sm font-medium active:scale-[0.99] transition"
-            >
-              Skip
-            </button>
-          </div>
+      <div className="w-full mb-6">
+        <div className="text-[11px] tracking-[0.2em] uppercase text-text-3 font-semibold mb-3">
+          {currentTagId ? "Tagged · tap to change" : "Tag this session?"}
         </div>
-      )}
+        <div className="flex flex-wrap gap-2 justify-center">
+          {tags.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => pickTag(t.id)}
+              className={`px-3.5 py-2 rounded-full border text-sm font-medium transition ${
+                currentTagId === t.id
+                  ? "bg-accent text-white border-accent"
+                  : "bg-surface text-text border-hairline"
+              }`}
+            >
+              {t.name}
+            </button>
+          ))}
+          <button
+            onClick={() => pickTag(null)}
+            className={`px-3.5 py-2 rounded-full border text-sm font-medium transition ${
+              currentTagId === null
+                ? "bg-text text-bg border-text"
+                : "bg-surface text-text-2 border-hairline border-dashed"
+            }`}
+          >
+            No tag
+          </button>
+        </div>
+      </div>
 
       <div className="w-full grid grid-cols-2 gap-2">
         <button
