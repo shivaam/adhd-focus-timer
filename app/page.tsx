@@ -99,6 +99,9 @@ export default function Page() {
     setPaused(false);
     setPausedAt(null);
     setPausedAccumMs(0);
+    if (opts.tagId) {
+      setSettings({ ...settings, lastUsedTagId: opts.tagId });
+    }
     setMode("session");
   };
 
@@ -192,6 +195,7 @@ export default function Page() {
         <StartSheet
           tags={tags}
           defaultDuration={settings.defaultDuration}
+          defaultTagId={settings.lastUsedTagId ?? null}
           onCancel={() => setMode("home")}
           onStart={({ durationMin, tagId, intent }) =>
             startSession({ durationMin, tagId, intent, source: "start_now" })

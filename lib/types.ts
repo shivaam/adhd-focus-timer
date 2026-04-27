@@ -37,6 +37,7 @@ export type Settings = {
   volume: number;
   defaultDuration: number;
   theme: "auto" | "light" | "dark";
+  lastUsedTagId?: string | null;
 };
 
 export type AppMode =

@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS: Settings = {
   volume: 35,
   defaultDuration: 25,
   theme: "auto",
+  lastUsedTagId: null,
 };
 
 function readJSON<T>(key: string, fallback: T): T {

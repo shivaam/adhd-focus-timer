@@ -7,15 +7,18 @@ import type { Tag } from "@/lib/types";
 type Props = {
   tags: Tag[];
   defaultDuration: number;
+  defaultTagId?: string | null;
   onCancel: () => void;
   onStart: (opts: { durationMin: number; tagId: string | null; intent: string | null }) => void;
 };
 
-export function StartSheet({ tags, defaultDuration, onCancel, onStart }: Props) {
+export function StartSheet({ tags, defaultDuration, defaultTagId, onCancel, onStart }: Props) {
   const [duration, setDuration] = useState<number>(
     DURATION_PRESETS.includes(defaultDuration as 5 | 15 | 25 | 50) ? defaultDuration : 25
   );
-  const [tagId, setTagId] = useState<string | null>(null);
+  const initialTagId =
+    defaultTagId && tags.some((t) => t.id === defaultTagId) ? defaultTagId : null;
+  const [tagId, setTagId] = useState<string | null>(initialTagId);
   const [intent, setIntent] = useState("");
 
   return (
