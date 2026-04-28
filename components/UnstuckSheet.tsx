@@ -12,6 +12,7 @@ type Props = {
   onCancel: () => void;
   onStart: (opts: { durationMin: number; intent: string; suggestion?: Suggestion }) => void;
   onPickPhysical: (action: PrimerAction) => void;
+  onSignIn: () => void;
 };
 
 export function UnstuckSheet({
@@ -19,11 +20,13 @@ export function UnstuckSheet({
   onCancel,
   onStart,
   onPickPhysical,
+  onSignIn,
 }: Props) {
   const [thought, setThought] = useState(initialThought);
   const [loading, setLoading] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const [previousActions, setPreviousActions] = useState<string[]>([]);
 
   const submit = async (textOverride?: string, opts?: { isRetry?: boolean }) => {
@@ -39,6 +42,7 @@ export function UnstuckSheet({
     }
     setLoading(true);
     setError(null);
+    setAuthRequired(false);
     setSuggestion(null);
     try {
       const supabase = createClient();
@@ -55,7 +59,11 @@ export function UnstuckSheet({
           ...(previous.length > 0 ? { previousActions: previous } : {}),
         }),
       });
-      const data = (await res.json()) as Suggestion & { error?: string };
+      const data = (await res.json()) as Suggestion & { error?: string; code?: string };
+      if (res.status === 401 || data.code === "auth_required") {
+        setAuthRequired(true);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || "Request failed");
       setSuggestion({ action: data.action, why: data.why || "", durationMin: data.durationMin });
     } catch (e) {
@@ -98,7 +106,44 @@ export function UnstuckSheet({
         <div className="w-10 h-10" />
       </header>
 
-      {!suggestion && (
+      {!suggestion && authRequired && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <div className="text-5xl mb-4">🔒</div>
+          <h1 className="text-2xl font-light leading-snug mb-2">
+            Sign in to use Claude.
+          </h1>
+          <p className="text-text-2 text-sm max-w-xs mb-8">
+            The AI Unstuck feature needs a free account to keep it from being
+            abused. The timer keeps working without one.
+          </p>
+          <div className="w-full space-y-2">
+            <button
+              onClick={onSignIn}
+              className="w-full bg-accent text-white rounded-full py-4 text-base font-semibold active:scale-[0.99] transition"
+            >
+              Sign in
+            </button>
+            <div className="text-text-3 text-xs uppercase tracking-[0.15em] font-semibold mt-6 mb-2">
+              Or do this instead
+            </div>
+            <div className="grid gap-2">
+              {PHYSICAL_ACTIONS.map((a) => (
+                <button
+                  key={a.text}
+                  onClick={() => onPickPhysical(a)}
+                  className="flex items-center gap-3 p-3.5 bg-surface border border-hairline rounded-2xl text-left active:scale-[0.99] transition"
+                >
+                  <div className="text-2xl">{a.emoji}</div>
+                  <div className="flex-1 text-text font-medium">{a.text}</div>
+                  <div className="text-text-3">›</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!suggestion && !authRequired && (
         <>
           <h1 className="text-2xl font-light leading-snug mb-2">What&apos;s in your head?</h1>
           <p className="text-text-2 text-sm mb-5">

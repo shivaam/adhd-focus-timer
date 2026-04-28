@@ -287,6 +287,7 @@ export default function Page() {
             setPrimerAction(action);
             setMode("primer");
           }}
+          onSignIn={() => setMode("signin")}
         />
       )}
 

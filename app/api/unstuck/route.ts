@@ -30,34 +30,6 @@ type Body = { thought?: string; previousActions?: string[] };
 const INPUT_CHAR_LIMIT = 500;
 const OUTPUT_TOKEN_LIMIT = 100;
 
-// Anonymous-IP fallback rate limit (in-memory, resets on cold start).
-// Authenticated users go through Supabase-tracked daily quota instead.
-const ANON_RATE_LIMIT = 5;
-const ANON_RATE_WINDOW_MS = 60 * 60 * 1000;
-const anonBuckets = new Map<string, number[]>();
-
-function anonRateCheck(ip: string): { ok: boolean; retryAfterSec: number } {
-  const now = Date.now();
-  const recent = (anonBuckets.get(ip) ?? []).filter(
-    (t) => now - t < ANON_RATE_WINDOW_MS
-  );
-  if (recent.length >= ANON_RATE_LIMIT) {
-    return {
-      ok: false,
-      retryAfterSec: Math.ceil((ANON_RATE_WINDOW_MS - (now - recent[0])) / 1000),
-    };
-  }
-  recent.push(now);
-  anonBuckets.set(ip, recent);
-  return { ok: true, retryAfterSec: 0 };
-}
-
-function clientIp(req: Request): string {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "unknown";
-}
-
 function startOfTodayIso(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -159,32 +131,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: caller.reason }, { status: 401 });
   }
 
-  if (caller.kind === "user") {
-    if (caller.blacklisted) {
-      return NextResponse.json({ error: "Account suspended." }, { status: 403 });
-    }
-    if (caller.dailyUsed >= caller.dailyQuota) {
-      return NextResponse.json(
-        {
-          error: `Daily quota reached (${caller.dailyQuota}). Resets at midnight.`,
-        },
-        { status: 429 }
-      );
-    }
-  } else {
-    // Anonymous → tighter IP-based rate limit.
-    const ip = clientIp(req);
-    const rate = anonRateCheck(ip);
-    if (!rate.ok) {
-      return NextResponse.json(
-        {
-          error: `Anonymous rate limit reached. Sign in for a higher quota, or try again in ${Math.ceil(
-            rate.retryAfterSec / 60
-          )} min.`,
-        },
-        { status: 429, headers: { "Retry-After": String(rate.retryAfterSec) } }
-      );
-    }
+  if (caller.kind !== "user") {
+    return NextResponse.json(
+      { error: "Sign in to use Claude.", code: "auth_required" },
+      { status: 401 }
+    );
+  }
+
+  if (caller.blacklisted) {
+    return NextResponse.json({ error: "Account suspended." }, { status: 403 });
+  }
+  if (caller.dailyUsed >= caller.dailyQuota) {
+    return NextResponse.json(
+      {
+        error: `Daily quota reached (${caller.dailyQuota}). Resets at midnight.`,
+      },
+      { status: 429 }
+    );
   }
 
   let body: Body;
