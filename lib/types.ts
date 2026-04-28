@@ -21,6 +21,11 @@ export const AUDIO_DESCRIPTIONS: Record<AudioMode, string> = {
 
 export type SessionSource = "unstuck" | "start_now" | "physical_action";
 
+export type Capture = {
+  text: string;
+  capturedAt: number;
+};
+
 export type Session = {
   id: string;
   startedAt: number;
@@ -30,6 +35,8 @@ export type Session = {
   intent: string | null;
   source: SessionSource;
   aiSuggestion?: { action: string; why?: string };
+  note?: string | null;
+  captures?: Capture[];
 };
 
 export type Settings = {

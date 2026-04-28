@@ -52,6 +52,10 @@ export function saveSession(s: Session) {
   writeJSON(KEY_SESSIONS, all);
 }
 
+export function saveSessions(all: Session[]) {
+  writeJSON(KEY_SESSIONS, all);
+}
+
 export function loadTags(): Tag[] {
   return readJSON<Tag[]>(KEY_TAGS, DEFAULT_TAGS);
 }
@@ -77,8 +81,67 @@ export function saveCurrent(s: Session | null) {
   else if (typeof window !== "undefined") window.localStorage.removeItem(KEY_CURRENT);
 }
 
-export function newId() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function newId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback (older runtimes) — produces UUID-shaped string.
+  const r = (n: number) =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  return `${r(8)}-${r(4)}-${r(4)}-${r(4)}-${r(12)}`;
+}
+
+export function isUUID(s: unknown): s is string {
+  return typeof s === "string" && UUID_RE.test(s);
+}
+
+/**
+ * One-time migration: any localStorage IDs created before we switched to UUIDs
+ * get regenerated, with cross-references (session.tagId, settings.lastUsedTagId)
+ * remapped consistently. Idempotent — no-op when everything is already UUIDs.
+ */
+export function migrateIdsIfNeeded(): boolean {
+  if (typeof window === "undefined") return false;
+
+  const tags = loadTags();
+  const sessions = loadSessions();
+  const settings = loadSettings();
+
+  const tagIdMap = new Map<string, string>();
+  let mutated = false;
+
+  for (const tag of tags) {
+    if (!isUUID(tag.id)) {
+      const fresh = newId();
+      tagIdMap.set(tag.id, fresh);
+      tag.id = fresh;
+      mutated = true;
+    }
+  }
+  if (mutated) saveTags(tags);
+
+  let sessionsMutated = false;
+  for (const s of sessions) {
+    if (!isUUID(s.id)) {
+      s.id = newId();
+      sessionsMutated = true;
+    }
+    if (s.tagId && tagIdMap.has(s.tagId)) {
+      s.tagId = tagIdMap.get(s.tagId)!;
+      sessionsMutated = true;
+    }
+  }
+  if (sessionsMutated) writeJSON(KEY_SESSIONS, sessions);
+
+  if (settings.lastUsedTagId && tagIdMap.has(settings.lastUsedTagId)) {
+    saveSettings({ ...settings, lastUsedTagId: tagIdMap.get(settings.lastUsedTagId) });
+    mutated = true;
+  }
+
+  return mutated || sessionsMutated;
 }
 
 export function useTags(): [Tag[], (t: Tag[]) => void] {

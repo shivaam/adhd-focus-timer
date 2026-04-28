@@ -6,6 +6,7 @@ import type { AudioMode, Settings, Tag } from "@/lib/types";
 import { newId } from "@/lib/store";
 import { pauseAudio, setAudioMode } from "@/lib/audio";
 import { signOut, useUser } from "@/lib/auth";
+import type { SyncStatus } from "@/lib/useSync";
 
 type Props = {
   settings: Settings;
@@ -14,7 +15,17 @@ type Props = {
   onTags: (t: Tag[]) => void;
   onClose: () => void;
   onSignIn: () => void;
+  syncStatus: SyncStatus;
+  lastSyncedAt: number | null;
 };
+
+function formatRelativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
 
 const SOUND_OPTIONS: AudioMode[] = ["tick", "brown", "lift"];
 
@@ -25,6 +36,8 @@ export function SettingsView({
   onTags,
   onClose,
   onSignIn,
+  syncStatus,
+  lastSyncedAt,
 }: Props) {
   const [newTag, setNewTag] = useState("");
   const [previewing, setPreviewing] = useState<AudioMode | null>(null);
@@ -91,19 +104,53 @@ export function SettingsView({
             Checking sign-in…
           </div>
         ) : user ? (
-          <div className="flex items-center justify-between bg-surface border border-hairline rounded-2xl px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] tracking-[0.15em] uppercase text-text-3 font-semibold mb-0.5">
-                Signed in as
+          <div className="bg-surface border border-hairline rounded-2xl px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] tracking-[0.15em] uppercase text-text-3 font-semibold mb-0.5">
+                  Signed in as
+                </div>
+                <div className="text-text font-medium truncate">{user.email}</div>
               </div>
-              <div className="text-text font-medium truncate">{user.email}</div>
+              <button
+                onClick={signOut}
+                className="ml-3 text-text-3 text-sm hover:text-text"
+              >
+                Sign out
+              </button>
             </div>
-            <button
-              onClick={signOut}
-              className="ml-3 text-text-3 text-sm hover:text-text"
-            >
-              Sign out
-            </button>
+            <div className="text-text-3 text-xs mt-2 flex items-center gap-1.5">
+              {syncStatus === "syncing" && (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                  Syncing…
+                </>
+              )}
+              {syncStatus === "synced" && lastSyncedAt && (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-2" />
+                  Synced · {formatRelativeTime(lastSyncedAt)}
+                </>
+              )}
+              {syncStatus === "error" && (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500" />
+                  Sync failed — local copy still works
+                </>
+              )}
+              {syncStatus === "idle" && lastSyncedAt && (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-2" />
+                  Synced · {formatRelativeTime(lastSyncedAt)}
+                </>
+              )}
+              {syncStatus === "idle" && !lastSyncedAt && (
+                <>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-text-3" />
+                  Not synced yet
+                </>
+              )}
+            </div>
           </div>
         ) : (
           <button

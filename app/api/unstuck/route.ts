@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -29,11 +30,27 @@ type Body = { thought?: string; previousActions?: string[] };
 const INPUT_CHAR_LIMIT = 500;
 const OUTPUT_TOKEN_LIMIT = 100;
 
-// Simple in-memory per-IP rate limit. Resets on serverless cold start.
-// For deploy: replace with Upstash or similar.
-const RATE_LIMIT = 15;
-const RATE_WINDOW_MS = 60 * 60 * 1000;
-const rateBuckets = new Map<string, number[]>();
+// Anonymous-IP fallback rate limit (in-memory, resets on cold start).
+// Authenticated users go through Supabase-tracked daily quota instead.
+const ANON_RATE_LIMIT = 5;
+const ANON_RATE_WINDOW_MS = 60 * 60 * 1000;
+const anonBuckets = new Map<string, number[]>();
+
+function anonRateCheck(ip: string): { ok: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const recent = (anonBuckets.get(ip) ?? []).filter(
+    (t) => now - t < ANON_RATE_WINDOW_MS
+  );
+  if (recent.length >= ANON_RATE_LIMIT) {
+    return {
+      ok: false,
+      retryAfterSec: Math.ceil((ANON_RATE_WINDOW_MS - (now - recent[0])) / 1000),
+    };
+  }
+  recent.push(now);
+  anonBuckets.set(ip, recent);
+  return { ok: true, retryAfterSec: 0 };
+}
 
 function clientIp(req: Request): string {
   const fwd = req.headers.get("x-forwarded-for");
@@ -41,16 +58,90 @@ function clientIp(req: Request): string {
   return req.headers.get("x-real-ip") ?? "unknown";
 }
 
-function rateCheck(ip: string): { ok: boolean; retryAfterSec: number } {
-  const now = Date.now();
-  const recent = (rateBuckets.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) {
-    const oldestInWindow = recent[0];
-    return { ok: false, retryAfterSec: Math.ceil((RATE_WINDOW_MS - (now - oldestInWindow)) / 1000) };
+function startOfTodayIso(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+/**
+ * Identify the caller. Prefer Supabase JWT (signed-in user). Fall back to IP-based
+ * anonymous limiting for users who haven't created an account yet.
+ *
+ * Returns either { userId, blacklisted, dailyQuota, dailyUsed } or { anonymous: true }.
+ */
+async function identifyCaller(req: Request): Promise<
+  | {
+      kind: "user";
+      userId: string;
+      blacklisted: boolean;
+      dailyQuota: number;
+      dailyUsed: number;
+      supabase: ReturnType<typeof createServerClient>;
+    }
+  | { kind: "anonymous" }
+  | { kind: "invalid_token"; reason: string }
+> {
+  const auth = req.headers.get("Authorization");
+  if (!auth || !auth.startsWith("Bearer ")) {
+    return { kind: "anonymous" };
   }
-  recent.push(now);
-  rateBuckets.set(ip, recent);
-  return { ok: true, retryAfterSec: 0 };
+  const token = auth.slice("Bearer ".length).trim();
+  if (!token) return { kind: "anonymous" };
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !supabaseKey) {
+    return { kind: "invalid_token", reason: "Server is missing Supabase config." };
+  }
+
+  // Build a server client that authenticates as the user via the bearer token.
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return [];
+      },
+      setAll() {
+        /* noop */
+      },
+    },
+    global: {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  });
+
+  const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+  if (userErr || !userData.user) {
+    return { kind: "invalid_token", reason: "Invalid or expired token." };
+  }
+  const userId = userData.user.id;
+
+  // user_meta + today's request count (RLS lets owner select their own rows).
+  const [metaRes, countRes] = await Promise.all([
+    supabase
+      .from("user_meta")
+      .select("blacklisted, daily_ai_quota")
+      .eq("user_id", userId)
+      .maybeSingle(),
+    supabase
+      .from("ai_request_log")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", startOfTodayIso()),
+  ]);
+
+  const blacklisted = metaRes.data?.blacklisted ?? false;
+  const dailyQuota = metaRes.data?.daily_ai_quota ?? 50;
+  const dailyUsed = countRes.count ?? 0;
+
+  return {
+    kind: "user",
+    userId,
+    blacklisted,
+    dailyQuota,
+    dailyUsed,
+    supabase,
+  };
 }
 
 export async function POST(req: Request) {
@@ -62,13 +153,38 @@ export async function POST(req: Request) {
     );
   }
 
-  const ip = clientIp(req);
-  const rate = rateCheck(ip);
-  if (!rate.ok) {
-    return NextResponse.json(
-      { error: `Too many requests. Try again in ${Math.ceil(rate.retryAfterSec / 60)} min.` },
-      { status: 429, headers: { "Retry-After": String(rate.retryAfterSec) } }
-    );
+  const caller = await identifyCaller(req);
+
+  if (caller.kind === "invalid_token") {
+    return NextResponse.json({ error: caller.reason }, { status: 401 });
+  }
+
+  if (caller.kind === "user") {
+    if (caller.blacklisted) {
+      return NextResponse.json({ error: "Account suspended." }, { status: 403 });
+    }
+    if (caller.dailyUsed >= caller.dailyQuota) {
+      return NextResponse.json(
+        {
+          error: `Daily quota reached (${caller.dailyQuota}). Resets at midnight.`,
+        },
+        { status: 429 }
+      );
+    }
+  } else {
+    // Anonymous → tighter IP-based rate limit.
+    const ip = clientIp(req);
+    const rate = anonRateCheck(ip);
+    if (!rate.ok) {
+      return NextResponse.json(
+        {
+          error: `Anonymous rate limit reached. Sign in for a higher quota, or try again in ${Math.ceil(
+            rate.retryAfterSec / 60
+          )} min.`,
+        },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSec) } }
+      );
+    }
   }
 
   let body: Body;
@@ -137,6 +253,15 @@ Give a meaningfully different first action.`;
   if (durationMin > 25) durationMin = 25;
   if (!action) {
     return NextResponse.json({ error: "Empty action." }, { status: 502 });
+  }
+
+  // Log successful authenticated request (best-effort, don't fail the response).
+  if (caller.kind === "user") {
+    void caller.supabase.from("ai_request_log").insert({
+      user_id: caller.userId,
+      thought_char_count: thought.length,
+      has_previous_actions: previousActions.length > 0,
+    });
   }
 
   return NextResponse.json({ action, why, durationMin });

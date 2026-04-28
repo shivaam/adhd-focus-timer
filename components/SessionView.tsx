@@ -17,6 +17,7 @@ type Props = {
   onResume: () => void;
   onCancel: () => void;
   onComplete: () => void;
+  onCapture: (text: string) => void;
 };
 
 export function SessionView({
@@ -30,9 +31,12 @@ export function SessionView({
   onResume,
   onCancel,
   onComplete,
+  onCapture,
 }: Props) {
   const [showControls, setShowControls] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureText, setCaptureText] = useState("");
 
   const timer = useTimer({
     startedAt: session.startedAt,
@@ -65,6 +69,22 @@ export function SessionView({
       className="flex flex-col flex-1 w-full max-w-md mx-auto px-6 pt-6 pb-10 relative"
       onClick={() => setShowControls(true)}
     >
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setCaptureOpen(true);
+          setCaptureText("");
+        }}
+        className="absolute top-6 left-6 w-11 h-11 rounded-full bg-surface border border-hairline flex items-center justify-center text-text z-10"
+        aria-label="Capture a thought"
+        title="Capture a thought"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+      </button>
+
       <button
         onClick={(e) => {
           e.stopPropagation();
@@ -152,6 +172,56 @@ export function SessionView({
               Pause
             </button>
           )}
+        </div>
+      )}
+
+      {captureOpen && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            setCaptureOpen(false);
+          }}
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm flex items-end justify-center"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-bg border-t border-hairline rounded-t-3xl p-5 pb-7"
+          >
+            <div className="w-10 h-1 rounded bg-text-3 mx-auto mb-4 opacity-50" />
+            <div className="text-[11px] tracking-[0.2em] uppercase text-text-3 font-semibold mb-2">
+              Park a thought
+            </div>
+            <textarea
+              autoFocus
+              value={captureText}
+              onChange={(e) => setCaptureText(e.target.value.slice(0, 500))}
+              placeholder="Random thought, todo, distraction — drop it here and keep going."
+              className="w-full min-h-24 bg-surface border border-hairline rounded-2xl px-4 py-3 text-text placeholder:text-text-3 outline-none focus:border-accent transition resize-none"
+            />
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => setCaptureOpen(false)}
+                className="flex-1 bg-surface text-text border border-hairline rounded-full py-3 text-sm font-semibold"
+              >
+                Never mind
+              </button>
+              <button
+                onClick={() => {
+                  if (!captureText.trim()) {
+                    setCaptureOpen(false);
+                    return;
+                  }
+                  onCapture(captureText);
+                  setCaptureText("");
+                  setCaptureOpen(false);
+                }}
+                disabled={!captureText.trim()}
+                className="flex-1 bg-accent text-white rounded-full py-3 text-sm font-semibold disabled:opacity-40"
+              >
+                Save & back to focus
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

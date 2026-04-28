@@ -14,25 +14,37 @@ import { SignIn } from "@/components/SignIn";
 import {
   loadCurrent,
   loadSessions,
+  migrateIdsIfNeeded,
   newId,
   saveCurrent,
   saveSession,
   useSettings,
   useTags,
 } from "@/lib/store";
+import {
+  deleteTagRemote,
+  pushSession,
+  pushSettings,
+  pushTag,
+} from "@/lib/sync";
+import { useSync } from "@/lib/useSync";
 import { pickBreakPrompt, randomBodyAction } from "@/lib/prompts";
 import type {
   AppMode,
+  Capture,
   PrimerAction,
   Session,
   SessionSource,
+  Settings,
+  Tag,
 } from "@/lib/types";
 
 export default function Page() {
   const [mode, setMode] = useState<AppMode>("home");
-  const [tags, setTags] = useTags();
-  const [settings, setSettings] = useSettings();
+  const [tags, setTagsLocal] = useTags();
+  const [settings, setSettingsLocal] = useSettings();
   const [allSessions, setAllSessions] = useState<Session[]>([]);
+  const sync = useSync();
 
   const [current, setCurrent] = useState<Session | null>(null);
   const [paused, setPaused] = useState(false);
@@ -46,11 +58,29 @@ export default function Page() {
 
   const refreshSessions = () => setAllSessions(loadSessions());
 
+  // setSettings + push to cloud (fire-and-forget when signed in)
+  const setSettings = (s: Settings) => {
+    setSettingsLocal(s);
+    void pushSettings(s);
+  };
+
+  // setTags + diff push/delete
+  const setTags = (next: Tag[]) => {
+    const prevIds = new Set(tags.map((t) => t.id));
+    const nextIds = new Set(next.map((t) => t.id));
+    setTagsLocal(next);
+    for (const t of next) void pushTag(t);
+    for (const id of prevIds) {
+      if (!nextIds.has(id)) void deleteTagRemote(id);
+    }
+  };
+
   // Hydrate any in-flight session on mount.
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
+    migrateIdsIfNeeded();
     setAllSessions(loadSessions());
     const c = loadCurrent();
     if (c && c.completedAt === null) {
@@ -59,6 +89,7 @@ export default function Page() {
       if (elapsed >= totalMs) {
         const completed = { ...c, completedAt: c.startedAt + totalMs };
         saveSession(completed);
+        void pushSession(completed);
         saveCurrent(null);
         setCompletedSession(completed);
         setBreakPrompt(pickBreakPrompt());
@@ -135,6 +166,7 @@ export default function Page() {
         completedAt: now,
       };
       saveSession(ended);
+      void pushSession(ended);
       refreshSessions();
     }
 
@@ -150,6 +182,7 @@ export default function Page() {
     if (!current) return;
     const completed: Session = { ...current, completedAt: Date.now() };
     saveSession(completed);
+    void pushSession(completed);
     saveCurrent(null);
     refreshSessions();
     setCurrent(null);
@@ -165,11 +198,34 @@ export default function Page() {
     if (!completedSession) return;
     const updated = { ...completedSession, tagId };
     saveSession(updated);
+    void pushSession(updated);
     refreshSessions();
     setCompletedSession(updated);
     if (tagId) {
       setSettings({ ...settings, lastUsedTagId: tagId });
     }
+  };
+
+  const setCompletedNote = (note: string) => {
+    if (!completedSession) return;
+    const updated = { ...completedSession, note: note.trim() || null };
+    saveSession(updated);
+    void pushSession(updated);
+    refreshSessions();
+    setCompletedSession(updated);
+  };
+
+  const addCapture = (text: string) => {
+    if (!current) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const capture: Capture = { text: trimmed, capturedAt: Date.now() };
+    const updated: Session = {
+      ...current,
+      captures: [...(current.captures ?? []), capture],
+    };
+    setCurrent(updated);
+    void pushSession(updated);
   };
 
   return (
@@ -267,6 +323,7 @@ export default function Page() {
           onResume={resumeSession}
           onCancel={cancelSession}
           onComplete={completeSession}
+          onCapture={addCapture}
         />
       )}
 
@@ -282,6 +339,7 @@ export default function Page() {
           session={completedSession}
           tags={tags}
           onTag={tagCompleted}
+          onNote={setCompletedNote}
           onHome={() => {
             setCompletedSession(null);
             setMode("home");
@@ -309,6 +367,8 @@ export default function Page() {
           onTags={setTags}
           onClose={() => setMode("home")}
           onSignIn={() => setMode("signin")}
+          syncStatus={sync.status}
+          lastSyncedAt={sync.lastSyncedAt}
         />
       )}
 

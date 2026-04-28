@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PHYSICAL_ACTIONS } from "@/lib/prompts";
 import type { PrimerAction } from "@/lib/types";
+import { createClient } from "@/utils/supabase/client";
 
 type Suggestion = { action: string; why: string; durationMin: number };
 
@@ -40,9 +41,15 @@ export function UnstuckSheet({
     setError(null);
     setSuggestion(null);
     try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
       const res = await fetch("/api/unstuck", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           thought: t,
           ...(previous.length > 0 ? { previousActions: previous } : {}),
