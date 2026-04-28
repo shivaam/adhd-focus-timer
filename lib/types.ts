@@ -49,7 +49,8 @@ export type AppMode =
   | "break"
   | "complete"
   | "stats"
-  | "settings";
+  | "settings"
+  | "signin";
 
 export type PrimerAction = {
   emoji: string;

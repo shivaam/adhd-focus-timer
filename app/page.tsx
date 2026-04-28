@@ -10,6 +10,7 @@ import { BreakView } from "@/components/BreakView";
 import { Complete } from "@/components/Complete";
 import { Stats } from "@/components/Stats";
 import { SettingsView } from "@/components/SettingsView";
+import { SignIn } from "@/components/SignIn";
 import {
   loadCurrent,
   loadSessions,
@@ -307,7 +308,12 @@ export default function Page() {
           onSettings={setSettings}
           onTags={setTags}
           onClose={() => setMode("home")}
+          onSignIn={() => setMode("signin")}
         />
+      )}
+
+      {mode === "signin" && (
+        <SignIn onClose={() => setMode("settings")} />
       )}
     </main>
   );

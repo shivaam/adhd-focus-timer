@@ -5,6 +5,7 @@ import { AUDIO_DESCRIPTIONS, AUDIO_LABELS } from "@/lib/types";
 import type { AudioMode, Settings, Tag } from "@/lib/types";
 import { newId } from "@/lib/store";
 import { pauseAudio, setAudioMode } from "@/lib/audio";
+import { signOut, useUser } from "@/lib/auth";
 
 type Props = {
   settings: Settings;
@@ -12,15 +13,24 @@ type Props = {
   onSettings: (s: Settings) => void;
   onTags: (t: Tag[]) => void;
   onClose: () => void;
+  onSignIn: () => void;
 };
 
 const SOUND_OPTIONS: AudioMode[] = ["tick", "brown", "lift"];
 
-export function SettingsView({ settings, tags, onSettings, onTags, onClose }: Props) {
+export function SettingsView({
+  settings,
+  tags,
+  onSettings,
+  onTags,
+  onClose,
+  onSignIn,
+}: Props) {
   const [newTag, setNewTag] = useState("");
   const [previewing, setPreviewing] = useState<AudioMode | null>(null);
   const previewingRef = useRef<AudioMode | null>(null);
   previewingRef.current = previewing;
+  const { user, loading: userLoading } = useUser();
 
   // Stop any preview when leaving Settings.
   useEffect(() => {
@@ -71,6 +81,44 @@ export function SettingsView({ settings, tags, onSettings, onTags, onClose }: Pr
         <div className="text-[11px] tracking-[0.2em] uppercase text-text-3 font-semibold">Settings</div>
         <div className="w-10 h-10" />
       </header>
+
+      <section className="mb-8">
+        <div className="text-[11px] tracking-[0.2em] uppercase text-text-3 font-semibold mb-3">
+          Account
+        </div>
+        {userLoading ? (
+          <div className="bg-surface border border-hairline rounded-2xl px-4 py-3 text-text-3 text-sm">
+            Checking sign-in…
+          </div>
+        ) : user ? (
+          <div className="flex items-center justify-between bg-surface border border-hairline rounded-2xl px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] tracking-[0.15em] uppercase text-text-3 font-semibold mb-0.5">
+                Signed in as
+              </div>
+              <div className="text-text font-medium truncate">{user.email}</div>
+            </div>
+            <button
+              onClick={signOut}
+              className="ml-3 text-text-3 text-sm hover:text-text"
+            >
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onSignIn}
+            className="w-full bg-surface border border-hairline rounded-2xl px-4 py-3 text-left active:scale-[0.99] transition"
+          >
+            <div className="text-[10px] tracking-[0.15em] uppercase text-accent font-semibold mb-0.5">
+              Sign in
+            </div>
+            <div className="text-text-2 text-sm">
+              Sync sessions across devices and use Claude Unstuck.
+            </div>
+          </button>
+        )}
+      </section>
 
       <section className="mb-8">
         <div className="text-[11px] tracking-[0.2em] uppercase text-text-3 font-semibold mb-3">
